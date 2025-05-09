@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/md5"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -22,18 +23,23 @@ var (
 	bucketName      = "files"
 	useSSL          = false
 	baseURL         string
+	uploadToken     string
 )
 
 func init() {
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found")
+	if err := godotenv.Load(".env"); err != nil {
+		log.Println("⚠️ No .env file found")
 	}
 	accessKeyID = os.Getenv("MINIO_ACCESS_KEY")
 	secretAccessKey = os.Getenv("MINIO_SECRET_KEY")
 	baseURL = os.Getenv("BASE_URL")
+	uploadToken = os.Getenv("UPLOAD_TOKEN")
 }
 
 func main() {
+	port := flag.String("port", "3333", "port for the HTTP server")
+	flag.Parse()
+
 	ctx := context.Background()
 
 	client, err := minio.New(endpoint, &minio.Options{
@@ -41,22 +47,31 @@ func main() {
 		Secure: useSSL,
 	})
 	if err != nil {
-		log.Fatalln(err)
+		log.Fatalln("❌ MinIO client init error:", err)
 	}
 
-	if exists, err := client.BucketExists(ctx, bucketName); err != nil {
-		log.Fatalln(err)
-	} else if !exists {
+	exists, err := client.BucketExists(ctx, bucketName)
+	if err != nil {
+		log.Fatalln("❌ Bucket check error:", err)
+	}
+	if !exists {
 		if err := client.MakeBucket(ctx, bucketName, minio.MakeBucketOptions{}); err != nil {
-			log.Fatalln(err)
+			log.Fatalln("❌ Bucket creation error:", err)
 		}
 	}
 
 	http.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if !strings.HasPrefix(authHeader, "Bearer ") || strings.TrimPrefix(authHeader, "Bearer ") != uploadToken {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
 		if r.Method != http.MethodPost {
 			http.Error(w, "Only POST supported", http.StatusMethodNotAllowed)
 			return
 		}
+
 		file, header, err := r.FormFile("file")
 		if err != nil {
 			http.Error(w, "No file", http.StatusBadRequest)
@@ -88,6 +103,7 @@ func main() {
 		io.Copy(w, object)
 	})
 
-	log.Println("Go server on :3333")
-	log.Fatal(http.ListenAndServe(":3333", nil))
+	addr := ":" + *port
+	log.Println("🚀 Go server listening on", addr)
+	log.Fatal(http.ListenAndServe(addr, nil))
 }

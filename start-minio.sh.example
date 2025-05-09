@@ -1,0 +1,4 @@
+#!/bin/bash
+export MINIO_ROOT_USER="minioadmin"
+export MINIO_ROOT_PASSWORD="minioadmin"
+/usr/local/bin/minio server ./minio-data --address :3334
